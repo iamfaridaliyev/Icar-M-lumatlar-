@@ -329,7 +329,7 @@ function renderStations(filteredFlat, f){
             <td><select class="cell-input" data-oid="${o._id}" data-field="utilities_included">
               <option value="" ${!o.utilities_included?'selected':''}>—</option>
               <option value="+" ${o.utilities_included==='+'?'selected':''}>включена</option>
-              <option value="-" ${o.utilities_included==='-'?'selected':''}>отдельно</option>
+              <option value="-" ${o.utilities_included==='-'?'selected':''}>не включена</option>
             </select></td>
             <td><input class="cell-input" data-oid="${o._id}" data-field="tenant" value="${escAttr(o.tenant)}" placeholder="свободно"></td>
             <td><button class="row-del" data-oid="${o._id}" title="Удалить объект">✕</button></td>
@@ -339,7 +339,7 @@ function renderStations(filteredFlat, f){
             <td class="num">${o.price_m2_actual? fmtNum(o.price_m2_actual,1):'—'}</td>
             <td class="num">${fmtNum(o.monthly_actual)}</td>
             <td>${contractBadge(o.contract)}</td>
-            <td>${o.utilities_included==='+'?'<span class="tag-yes">включена</span>':o.utilities_included==='-'?'<span class="tag-no">отдельно</span>':'<span class="tag-none">—</span>'}</td>
+            <td>${o.utilities_included==='+'?'<span class="tag-yes">включена</span>':o.utilities_included==='-'?'<span class="tag-no">не включена</span>':'<span class="tag-none">—</span>'}</td>
             <td>${o.tenant? `<span class="tenant-name">${o.tenant}</span>`:'<span class="empty-tag">свободно</span>'}</td>
           </tr>`).join('')}
           </tbody>
@@ -445,7 +445,7 @@ function renderObjectsTable(list){
     <td class="num">${o.price_m2_actual? fmtNum(o.price_m2_actual,1):'—'}</td>
     <td class="num">${fmtNum(o.monthly_actual)}</td>
     <td>${contractBadge(o.contract)}</td>
-    <td>${o.utilities_included==='+'?'<span class="tag-yes">вкл.</span>':o.utilities_included==='-'?'<span class="tag-no">отдельно</span>':'—'}</td>
+    <td>${o.utilities_included==='+'?'<span class="tag-yes">вкл.</span>':o.utilities_included==='-'?'<span class="tag-no">не включена</span>':'—'}</td>
     <td>${o.tenant? `<span class="tenant-name">${o.tenant}</span>`:'<span class="empty-tag">свободно</span>'}</td>
     <td>${o.phone||'—'}</td>
   </tr>`).join('');
