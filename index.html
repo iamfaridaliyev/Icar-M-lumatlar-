@@ -35,6 +35,11 @@
   button.export{padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--card);font-size:13px;font-weight:600;cursor:pointer;color:var(--text);}
   button.export:hover{background:var(--accent-light);border-color:var(--accent);}
   button.export.active-edit{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .file-banner{margin:0 0 14px;padding:10px 14px;border-radius:10px;font-size:12.5px;}
+  .file-banner.connected{background:var(--green-bg);color:var(--green);}
+  .file-banner.needs-permission{background:var(--amber-bg);color:#8a6d1a;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;}
+  .file-banner.unsupported{background:#eef1f4;color:var(--muted);}
+  .file-banner.disconnected{background:var(--amber-bg);color:#8a6d1a;}
   .view{display:none;}
   .view.active{display:block;}
   .station-card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:14px;overflow:hidden;}
@@ -100,6 +105,12 @@
 <div class="wrap">
   <div class="stats" id="statsRow"></div>
 
+  <div class="file-banner" id="fileBanner">Проверка подключения к файлу на компьютере…</div>
+  <div class="toolbar" id="fileToolbar">
+    <button class="export" id="connectFileBtn">📁 Сохранять в файл на компьютере</button>
+    <button class="export" id="openFileBtn">📂 Открыть существующий файл</button>
+  </div>
+
   <div class="toolbar">
     <div class="tabs">
       <div class="tab active" data-view="stations">Заправки</div>
@@ -126,7 +137,7 @@
     <button class="export" id="addStationBtn">+ Добавить заправку</button>
     <button class="export" id="downloadSite">💾 Скачать обновлённый сайт</button>
     <button class="export" id="resetData">↺ Сбросить изменения</button>
-    <span class="hint">Изменения сохраняются автоматически в этом браузере. Чтобы обновления увидели коллеги — скачайте файл и замените index.html в GitHub.</span>
+    <span class="hint">Изменения сохраняются автоматически (в файл на компьютере, если он подключён, и в этом браузере). Чтобы обновления увидели коллеги — скачайте файл и замените index.html в GitHub.</span>
   </div>
 
   <div class="view active" id="view-stations"><div id="stationList"></div></div>
@@ -199,8 +210,141 @@ function loadData(){
 }
 function saveData(){
   localStorage.setItem('ydm_data_v1', JSON.stringify(DATA, (k,v)=> k==='_id' ? undefined : v));
+  saveToFile();
 }
 let DATA = loadData();
+
+// ---------- save to a real file on the computer (File System Access API) ----------
+let fileHandle = null;
+
+function idbOpen(){
+  return new Promise((resolve,reject)=>{
+    const req = indexedDB.open('ydmFileDB', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('kv');
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbSet(key, val){
+  const db = await idbOpen();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction('kv','readwrite');
+    tx.objectStore('kv').put(val, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function idbGet(key){
+  const db = await idbOpen();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction('kv','readonly');
+    const req = tx.objectStore('kv').get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function fsapiSupported(){ return !!window.showSaveFilePicker; }
+
+function setFileBanner(kind){
+  const el = document.getElementById('fileBanner');
+  if(!el) return;
+  el.className = 'file-banner ' + kind;
+  el.onclick = null;
+  if(kind === 'connected'){
+    el.innerHTML = '🟢 Данные сохраняются в файл на компьютере: <b>' + (fileHandle? fileHandle.name : '') + '</b>';
+  } else if(kind === 'needs-permission'){
+    el.innerHTML = '🟡 Нужно разрешение на доступ к файлу «' + (fileHandle? fileHandle.name : '') + '» — нажмите здесь, чтобы восстановить сохранение.';
+    el.onclick = reconnectPermission;
+  } else if(kind === 'unsupported'){
+    el.innerHTML = 'ℹ️ Этот браузер не поддерживает сохранение прямо в файл на компьютере (используйте Chrome или Edge). Данные пока сохраняются только в этом браузере.';
+  } else {
+    el.innerHTML = '🟡 Данные пока сохраняются только в этом браузере. Нажмите «📁 Сохранять в файл на компьютере», чтобы данные всегда были в файле на рабочем столе.';
+  }
+}
+
+async function connectFile(){
+  if(!fsapiSupported()){ setFileBanner('unsupported'); alert('Этот браузер не поддерживает эту функцию. Используйте Chrome или Edge (и откройте сайт по обычной ссылке, не как локальный файл).'); return; }
+  try{
+    fileHandle = await window.showSaveFilePicker({suggestedName:'ydm_data.json', types:[{description:'JSON', accept:{'application/json':['.json']}}]});
+    await idbSet('fileHandle', fileHandle);
+    await saveToFile();
+  }catch(e){ /* user cancelled */ }
+}
+
+async function openExistingFile(){
+  if(!fsapiSupported()){ setFileBanner('unsupported'); alert('Этот браузер не поддерживает эту функцию. Используйте Chrome или Edge.'); return; }
+  try{
+    const [handle] = await window.showOpenFilePicker({types:[{description:'JSON', accept:{'application/json':['.json']}}]});
+    const perm = await handle.requestPermission({mode:'readwrite'});
+    if(perm !== 'granted') return;
+    fileHandle = handle;
+    await idbSet('fileHandle', fileHandle);
+    const file = await fileHandle.getFile();
+    const text = await file.text();
+    if(text.trim()){
+      const parsed = JSON.parse(text);
+      if(Array.isArray(parsed)){
+        DATA = parsed;
+        assignIds(DATA);
+        openSet = new Set();
+        localStorage.setItem('ydm_data_v1', JSON.stringify(DATA, (k,v)=> k==='_id' ? undefined : v));
+        applyFilters();
+      } else {
+        alert('Этот файл не похож на файл данных YDM. Выбран не тот файл?');
+        return;
+      }
+    } else {
+      await saveToFile();
+    }
+    setFileBanner('connected');
+  }catch(e){ /* user cancelled */ }
+}
+
+async function saveToFile(){
+  if(!fileHandle) return;
+  try{
+    const perm = await fileHandle.queryPermission({mode:'readwrite'});
+    if(perm !== 'granted'){ setFileBanner('needs-permission'); return; }
+    const clean = DATA.map(s=>({...s, objects: s.objects.map(o=>{ const c={...o}; delete c._id; return c; })}));
+    const writable = await fileHandle.createWritable();
+    await writable.write(JSON.stringify(clean, null, 2));
+    await writable.close();
+    setFileBanner('connected');
+  }catch(e){ console.error('saveToFile failed', e); }
+}
+
+async function reconnectPermission(){
+  if(!fileHandle) return;
+  try{
+    const perm = await fileHandle.requestPermission({mode:'readwrite'});
+    if(perm === 'granted'){ await saveToFile(); }
+  }catch(e){}
+}
+
+async function tryRestoreFileHandle(){
+  if(!fsapiSupported()){ setFileBanner('unsupported'); return; }
+  try{
+    const handle = await idbGet('fileHandle');
+    if(!handle){ setFileBanner('disconnected'); return; }
+    fileHandle = handle;
+    const perm = await fileHandle.queryPermission({mode:'readwrite'});
+    if(perm === 'granted'){
+      const file = await fileHandle.getFile();
+      const text = await file.text();
+      if(text.trim()){
+        const parsed = JSON.parse(text);
+        if(Array.isArray(parsed) && parsed.length){
+          DATA = parsed;
+          assignIds(DATA);
+          applyFilters();
+        }
+      }
+      setFileBanner('connected');
+    } else {
+      setFileBanner('needs-permission');
+    }
+  }catch(e){ setFileBanner('disconnected'); }
+}
 let editMode = false;
 let openSet = new Set();
 
@@ -527,12 +671,17 @@ document.getElementById('editToggle').addEventListener('click', ()=>{
   applyFilters();
 });
 document.getElementById('addStationBtn').addEventListener('click', addStation);
-document.getElementById('resetData').addEventListener('click', ()=>{
+document.getElementById('resetData').addEventListener('click', async ()=>{
   if(!confirm('Сбросить все изменения и вернуть исходные данные из этого файла? Это нельзя отменить.')) return;
   localStorage.removeItem('ydm_data_v1');
+  DATA = cloneData(EMBEDDED_DATA);
+  assignIds(DATA);
+  if(fileHandle){ await saveToFile(); }
   location.reload();
 });
 document.getElementById('downloadSite').addEventListener('click', downloadUpdatedSite);
+document.getElementById('connectFileBtn').addEventListener('click', connectFile);
+document.getElementById('openFileBtn').addEventListener('click', openExistingFile);
 
 async function downloadUpdatedSite(){
   let htmlText;
@@ -737,6 +886,7 @@ document.getElementById('exportExcel').addEventListener('click', exportExcelXlsx
 
 // ---------- init ----------
 applyFilters();
+tryRestoreFileHandle();
 </script>
 </body>
 </html>
