@@ -369,8 +369,32 @@ function buildFlat(){
 }
 
 // ---------- stats ----------
-function renderStats(list){
-  const nStations = new Set(list.map(o=>o.station_no)).size;
+function countVisibleStations(filteredFlat, f){
+  const byStation = new Map();
+  filteredFlat.forEach(o=>{
+    if(!byStation.has(o.station_no)) byStation.set(o.station_no, 0);
+    byStation.set(o.station_no, byStation.get(o.station_no)+1);
+  });
+  const noRestrictiveFilter = !f.contract && !f.occ;
+  let count = 0;
+  DATA.forEach(s=>{
+    const n = byStation.get(s.station_no) || 0;
+    const isEmptyStation = s.objects.length === 0;
+    if(n === 0){
+      if(!isEmptyStation) return;
+      if(!noRestrictiveFilter) return;
+      if(f.q){
+        const hay = [s.station_no, s.address].filter(Boolean).join(' ').toLowerCase();
+        if(!hay.includes(f.q)) return;
+      }
+    }
+    count++;
+  });
+  return count;
+}
+
+function renderStats(list, f){
+  const nStations = countVisibleStations(list, f);
   const nObjects = list.length;
   const totalRevenue = list.reduce((a,o)=>a+(o.monthly_actual||0),0);
   const occupied = list.filter(o=>!isVacant(o)).length;
@@ -646,7 +670,7 @@ function applyFilters(){
   buildFlat();
   const f = currentFilters();
   const filtered = FLAT.filter(o=>matchesFilters(o,f));
-  renderStats(filtered);
+  renderStats(filtered, f);
   renderStations(filtered, f);
   renderObjectsTable(filtered);
   renderTenants(filtered);
@@ -835,7 +859,7 @@ async function exportExcelXlsx(){
   ws.getRow(r).height = 22;
   r++;
 
-  const nStations = new Set(rows.map(o=>o.station_no)).size;
+  const nStations = countVisibleStations(rows, f);
   const occupied = rows.filter(o=>!isVacant(o)).length;
   const occRate = rows.length ? Math.round(occupied/rows.length*100) : 0;
   const withContract = rows.filter(o=>o.contract==='Var').length;
